@@ -568,3 +568,50 @@ button:disabled {
     font-size: 24px;
   }
 }
+
+/* Hover pop-up on the + button */
+.plus-wrap {
+  position: relative;
+  display: flex;
+}
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 10;
+}
+.tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 14px;
+  border: 5px solid transparent;
+  border-top-color: var(--text);
+}
+.tooltip-hint {
+  font-size: 11.5px;
+  font-weight: 400;
+  opacity: 0.75;
+}
+.plus-wrap:hover .tooltip,
+.plus-btn:focus-visible + .tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+.plus-btn:disabled + .tooltip {
+  display: none;
+}

@@ -85,14 +85,21 @@ export default function Composer() {
       )}
 
       <div className="composer">
-        <button
-          className="plus-btn"
-          title={activeDocument ? "Replace the document" : "Attach a document (PDF, Word, TXT, Markdown)"}
-          onClick={() => fileRef.current?.click()}
-          disabled={uploading || streaming}
-        >
-          {uploading ? <span className="spinner" /> : "+"}
-        </button>
+        <div className="plus-wrap">
+          <button
+            className="plus-btn"
+            aria-label={activeDocument ? "Replace the attached file" : "Attach files"}
+            aria-describedby="attach-tooltip"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading || streaming}
+          >
+            {uploading ? <span className="spinner" /> : "+"}
+          </button>
+          <span className="tooltip" id="attach-tooltip" role="tooltip">
+            {activeDocument ? "Replace file" : "Attach files"}
+            <span className="tooltip-hint">PDF, Word, TXT or Markdown</span>
+          </span>
+        </div>
         <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={handleFilePick} />
 
         <textarea
