@@ -53,7 +53,7 @@ You need Node.js 22+, and:
 
 ```sh
 cp backend/.env.example backend/.env      # fill in the values
-cp frontend/.env.example frontend/.env    # already correct for local use
+cp frontend/.env.example frontend/.env    # can stay empty for local use
 cd frontend
 npm run setup             # installs frontend and backend packages
 npm run --prefix ../backend check-index   # confirms the Pinecone index works
