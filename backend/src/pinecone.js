@@ -1,5 +1,5 @@
 import { Pinecone } from '@pinecone-database/pinecone';
-import { EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, settings } from './config.js';
+import { EMBEDDING_MODEL, MODEL_DIMENSIONS, settings } from './config.js';
 import { UserError } from './errors.js';
 
 const EMBED_BATCH_SIZE = 96; // llama-text-embed-v2 accepts at most 96 inputs per request.
@@ -8,7 +8,7 @@ const UPSERT_BATCH_SIZE = 100;
 // Wraps Pinecone embeddings and one index. Each chat's document lives in its own namespace.
 // `pc` can be injected for tests.
 export function createVectorStore({ pc, apiKey = settings().pineconeApiKey, indexName = settings().pineconeIndex } = {}) {
-  let indexPromise;
+  let connection;
 
   function client() {
     if (pc) return pc;
@@ -17,30 +17,37 @@ export function createVectorStore({ pc, apiKey = settings().pineconeApiKey, inde
     return pc;
   }
 
-  // Connects once, checking the index matches the embedding model.
-  function index() {
-    indexPromise ??= (async () => {
+  // Connects once, checking the index can hold the embeddings. Resolves to
+  // { target, indexDimension, modelDimension }.
+  function connect() {
+    connection ??= (async () => {
       if (!indexName) throw new UserError('The server is missing PINECONE_INDEX_NAME.', 500);
       const description = await client().indexes.describe(indexName);
       if (!description.status?.ready) throw new UserError(`The Pinecone index "${indexName}" is not ready yet.`, 503);
       const dense = description.schema?.fields?._values;
-      if (dense?.type !== 'dense_vector' || dense.dimension !== EMBEDDING_DIMENSIONS || dense.metric !== 'cosine') {
-        throw new UserError(`The Pinecone index "${indexName}" must be dense, ${EMBEDDING_DIMENSIONS}-dimensional and cosine.`, 500);
+      const modelDimension = MODEL_DIMENSIONS.findLast(size => size <= dense?.dimension);
+      if (dense?.type !== 'dense_vector' || dense.metric !== 'cosine' || !modelDimension) {
+        const actual = dense ? `${dense.type}, ${dense.dimension} dimensions, ${dense.metric}` : 'no dense vectors';
+        throw new UserError(`The Pinecone index "${indexName}" must be dense, cosine and at least ${MODEL_DIMENSIONS[0]}-dimensional (it is: ${actual}).`, 500);
       }
-      return client().index({ host: description.host });
-    })().catch(error => { indexPromise = undefined; throw error; });
-    return indexPromise;
+      return { target: client().index({ host: description.host }), indexDimension: dense.dimension, modelDimension };
+    })().catch(error => { connection = undefined; throw error; });
+    return connection;
   }
 
-  // Returns one vector per text, in input order. inputType is 'passage' or 'query'.
+  const index = async () => (await connect()).target;
+
+  // Returns one index-sized vector per text, in input order. inputType is 'passage' or 'query'.
   async function embed(texts, inputType) {
+    const { indexDimension, modelDimension } = await connect();
+    const padding = Array(indexDimension - modelDimension).fill(0);
     const vectors = [];
     for (let start = 0; start < texts.length; start += EMBED_BATCH_SIZE) {
       const batch = texts.slice(start, start + EMBED_BATCH_SIZE);
       const response = await client().inference.embed({
         model: EMBEDDING_MODEL,
         inputs: batch,
-        parameters: { inputType, dimension: EMBEDDING_DIMENSIONS, truncate: 'END' },
+        parameters: { inputType, dimension: modelDimension, truncate: 'END' },
       });
       if (response.data?.length !== batch.length) throw new Error('The embedding service returned an unexpected number of vectors.');
 
@@ -48,10 +55,10 @@ export function createVectorStore({ pc, apiKey = settings().pineconeApiKey, inde
       for (const [position, embedding] of response.data.entries()) {
         const i = embedding.index ?? position;
         if (!Number.isInteger(i) || i < 0 || i >= batch.length || ordered[i]) throw new Error('The embedding service returned an invalid input index.');
-        if (embedding.vectorType !== 'dense' || embedding.values?.length !== EMBEDDING_DIMENSIONS) {
-          throw new Error(`Expected ${EMBEDDING_DIMENSIONS}-dimensional dense embeddings.`);
+        if (embedding.vectorType !== 'dense' || embedding.values?.length !== modelDimension) {
+          throw new Error(`Expected ${modelDimension}-dimensional dense embeddings.`);
         }
-        ordered[i] = embedding.values;
+        ordered[i] = padding.length ? embedding.values.concat(padding) : embedding.values;
       }
       vectors.push(...ordered);
     }

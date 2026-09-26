@@ -32,11 +32,11 @@ test('Groq errors become friendly messages', async () => {
   await assert.rejects(streamCompletion([], () => {}, { apiKey: '' }), /GROQ_API_KEY/);
 });
 
-function fakePinecone({ dimension = 1024, embedIndexes } = {}) {
+function fakePinecone({ dimension = 1024, metric = 'cosine', embedIndexes } = {}) {
   const calls = { deleted: [] };
   return {
     calls,
-    indexes: { describe: async () => ({ host: 'h', status: { ready: true }, schema: { fields: { _values: { type: 'dense_vector', dimension, metric: 'cosine' } } } }) },
+    indexes: { describe: async () => ({ host: 'h', status: { ready: true }, schema: { fields: { _values: { type: 'dense_vector', dimension, metric } } } }) },
     index: () => ({
       deleteNamespace: async namespace => {
         calls.deleted.push(namespace);
@@ -44,9 +44,10 @@ function fakePinecone({ dimension = 1024, embedIndexes } = {}) {
       },
     }),
     inference: {
-      embed: async ({ inputs }) => ({
-        data: inputs.map((_, i) => ({ vectorType: 'dense', values: vectorFor(i), index: embedIndexes?.[i] ?? i })),
-      }),
+      embed: async ({ inputs, parameters }) => {
+        calls.embedDimension = parameters.dimension;
+        return { data: inputs.map((_, i) => ({ vectorType: 'dense', values: vectorFor(i, parameters.dimension), index: embedIndexes?.[i] ?? i })) };
+      },
     },
   };
 }
@@ -57,8 +58,10 @@ test('embeddings keep input order and reject wrong index shapes', async () => {
   assert.deepEqual(first, vectorFor(1));
   assert.deepEqual(second, vectorFor(0));
 
-  const wrong = createVectorStore({ pc: fakePinecone({ dimension: 3000 }), indexName: 'test' });
-  await assert.rejects(wrong.deleteNamespace('x'), /must be dense, 1024-dimensional and cosine/);
+  const dotProduct = createVectorStore({ pc: fakePinecone({ metric: 'dotproduct' }), indexName: 'test' });
+  await assert.rejects(dotProduct.deleteNamespace('x'), /must be dense, cosine .*it is: dense_vector, 1024 dimensions, dotproduct/);
+  const tooSmall = createVectorStore({ pc: fakePinecone({ dimension: 128 }), indexName: 'test' });
+  await assert.rejects(tooSmall.embed(['a'], 'query'), /at least 384-dimensional/);
   await assert.rejects(createVectorStore({ pc: fakePinecone(), indexName: '' }).deleteNamespace('x'), /PINECONE_INDEX_NAME/);
 });
 
@@ -66,4 +69,18 @@ test('deleting a namespace that was never created is not an error', async () => 
   const pc = fakePinecone();
   await createVectorStore({ pc, indexName: 'test' }).deleteNamespace('missing');
   assert.deepEqual(pc.calls.deleted, ['missing']);
+});
+
+test('larger indexes get zero-padded embeddings (e.g. 2048 + 952 for 3000)', async () => {
+  const pc = fakePinecone({ dimension: 3000 });
+  const [vector] = await createVectorStore({ pc, indexName: 'test' }).embed(['a'], 'query');
+  assert.equal(pc.calls.embedDimension, 2048);
+  assert.equal(vector.length, 3000);
+  assert.deepEqual(vector.slice(0, 2048), vectorFor(0, 2048));
+  assert.ok(vector.slice(2048).every(value => value === 0));
+
+  const exact = fakePinecone({ dimension: 1024 });
+  const [plain] = await createVectorStore({ pc: exact, indexName: 'test' }).embed(['a'], 'query');
+  assert.equal(exact.calls.embedDimension, 1024);
+  assert.equal(plain.length, 1024);
 });

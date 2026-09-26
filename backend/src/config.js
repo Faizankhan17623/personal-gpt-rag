@@ -3,7 +3,10 @@ import 'dotenv/config';
 const list = value => (value || '').split(',').map(item => item.trim()).filter(Boolean);
 
 export const EMBEDDING_MODEL = 'llama-text-embed-v2';
-export const EMBEDDING_DIMENSIONS = 1024; // The Pinecone index must be dense, 1024-dimensional, cosine.
+// Output sizes llama-text-embed-v2 supports. The index can be any dense cosine index at least
+// 384-dimensional: embeddings use the largest size that fits and are zero-padded to the index
+// dimension (e.g. 2048 + 952 zeros for a 3000-dimensional index). Padding preserves cosine similarity.
+export const MODEL_DIMENSIONS = [384, 512, 768, 1024, 2048];
 
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-120b';

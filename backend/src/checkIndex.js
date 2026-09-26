@@ -1,6 +1,6 @@
 // Checks the Pinecone setup: index shape, embedding round trip and stored namespaces.
 import { Pinecone } from '@pinecone-database/pinecone';
-import { settings } from './config.js';
+import { settings, MODEL_DIMENSIONS } from './config.js';
 import { createVectorStore } from './pinecone.js';
 
 const { pineconeApiKey, pineconeIndex, groqApiKey } = settings();
@@ -16,12 +16,15 @@ const vectors = createVectorStore({ pc, indexName: pineconeIndex });
 try {
   const [vector] = await vectors.embed(['connection test'], 'query');
   await vectors.query('connection-test', vector, 1);
-  console.log(`Index "${pineconeIndex}" is ready and matches the ${vector.length}-dimensional embeddings.`);
-
   const description = await pc.indexes.describe(pineconeIndex);
+  const modelDimension = MODEL_DIMENSIONS.findLast(size => size <= vector.length);
+  const padding = vector.length - modelDimension;
+  console.log(`Index "${pineconeIndex}" is ready: ${vector.length} dimensions, cosine.`);
+  console.log(`Embeddings: ${modelDimension} dimensions${padding ? ` + ${padding} zeros of padding` : ', no padding needed'}.`);
+
   const stats = await pc.index({ host: description.host }).describeIndexStats();
   const namespaces = Object.entries(stats.namespaces || {});
-  console.log(`Records: ${stats.totalRecordCount ?? 0} in ${namespaces.length} chat namespace(s).`);
+  console.log(`Records: ${stats.totalRecordCount ?? 0} in ${namespaces.length} namespace(s) (chat-… ones belong to this app).`);
   for (const [name, { recordCount }] of namespaces.slice(0, 20)) console.log(`- ${name}: ${recordCount} chunks`);
 } catch (error) {
   console.error('Pinecone check failed:', error.message);

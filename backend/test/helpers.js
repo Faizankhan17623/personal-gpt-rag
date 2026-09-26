@@ -2,7 +2,7 @@ import { createApp } from '../src/app.js';
 import { createMemoryStore } from '../src/store/memoryStore.js';
 
 export const DIMENSIONS = 1024;
-export const vectorFor = seed => Array.from({ length: DIMENSIONS }, (_, i) => ((i * 31 + seed) % 97) / 97 + 0.01);
+export const vectorFor = (seed, length = DIMENSIONS) => Array.from({ length }, (_, i) => ((i * 31 + seed) % 97) / 97 + 0.01);
 
 // In-memory stand-in for the Pinecone wrapper.
 export function fakeVectors() {

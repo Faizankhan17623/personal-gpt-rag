@@ -1,26 +1,20 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
-dist-ssr/
-
 # Secrets: keep .env private, commit only .env.example
 .env
 .env.*
 !.env.example
-*.local
-
-# Vercel CLI
-.vercel/
 
 # Logs
 *.log
 npm-debug.log*
 
+# Test coverage
+coverage/
+
 # OS and editor files
 .DS_Store
 Thumbs.db
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 .idea/

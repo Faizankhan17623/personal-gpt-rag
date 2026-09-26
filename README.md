@@ -18,12 +18,14 @@ A ChatGPT-style web app: attach a PDF, Word (.docx), TXT or Markdown file to a c
 
 ```
 upload → extract text (pdf-parse, mammoth) → ~1000-char chunks, 200 overlap
-       → llama-text-embed-v2 (1024 dims) → Pinecone namespace chat-<id>, then verified
+       → llama-text-embed-v2 → Pinecone namespace chat-<id>, then verified
 
 question → embed → top 5 chunks from the chat's namespace → Groq (streamed) → answer + sources
 ```
 
 Chunk IDs are derived from the document's content, so re-uploading the same file overwrites instead of duplicating.
+
+The app reads the Pinecone index's dimension and adapts. `llama-text-embed-v2` produces 384, 512, 768, 1024 or 2048 dimensions; the app uses the largest size that fits and pads with zeros up to the index size. For example, a 3000-dimensional index gets 2048 dimensions plus 952 zeros. Zero padding doesn't change cosine similarity.
 
 ## Project layout
 
@@ -45,28 +47,20 @@ frontend/                React 19 + Redux Toolkit + Vite
 ## Setup
 
 You need Node.js 22+, and:
-- **Pinecone:** an index that is **dense, dimension 1024, metric cosine**.
+- **Pinecone:** a **dense, cosine** index with at least 384 dimensions. 1024 needs no padding; larger sizes such as 3000 work with padding.
 - **Groq:** an API key from https://console.groq.com/keys.
 - **MongoDB:** a connection string, only for deployment. A free MongoDB Atlas cluster works.
 
-**Backend:**
-
 ```sh
-cd backend
-cp .env.example .env      # fill in the values
-npm install
-npm run check-index       # confirms the Pinecone index is set up correctly
-npm run dev               # http://localhost:4000
-```
-
-**Frontend** (in a second terminal):
-
-```sh
+cp backend/.env.example backend/.env      # fill in the values
+cp frontend/.env.example frontend/.env    # already correct for local use
 cd frontend
-cp .env.example .env      # VITE_API_URL=http://localhost:4000/api
-npm install
-npm run dev               # http://localhost:5173
+npm run setup             # installs frontend and backend packages
+npm run --prefix ../backend check-index   # confirms the Pinecone index works
+npm run dev               # starts both: API on :4000, website on http://localhost:5173
 ```
+
+`npm run dev` in `frontend` uses **concurrently** to run the backend and frontend together, with labelled `[api]` and `[web]` output. Use `npm run dev:frontend` or `npm run dev:backend` to run just one.
 
 On Windows cmd, use `copy` instead of `cp`.
 
@@ -78,7 +72,9 @@ On Windows cmd, use `copy` instead of `cp`.
 | backend | `npm start` | Start the API (production) |
 | backend | `npm test` | Offline tests |
 | backend | `npm run check-index` | Check the Pinecone index and list stored chat namespaces |
-| frontend | `npm run dev` | Start the website |
+| frontend | `npm run dev` | Start backend and website together |
+| frontend | `npm run dev:frontend` / `dev:backend` | Start just one of them |
+| frontend | `npm run setup` | Install frontend and backend packages |
 | frontend | `npm run build` | Production build into `dist/` |
 | frontend | `npm run lint` | Lint with oxlint |
 
@@ -98,7 +94,7 @@ On Render's free plan the backend sleeps when idle, so the first request after a
 
 ## Troubleshooting
 
-- **"must be dense, 1024-dimensional and cosine":** create the Pinecone index with those settings and put its name in `PINECONE_INDEX_NAME`.
+- **"must be dense, cosine and at least 384-dimensional":** use a dense cosine index and put its name in `PINECONE_INDEX_NAME`. `npm run check-index` shows what the index actually is.
 - **"Could not reach the server":** check that the backend is running and that `VITE_API_URL` ends in `/api`.
 - **"Too many requests":** you hit a rate limit or Groq's free-tier limit. Wait a few minutes.
 - **Scanned PDFs:** they have no selectable text and need OCR before upload.
