@@ -28,6 +28,7 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
       handler: (req, res) => res.status(429).json({ error: 'Too many requests. Please wait a few minutes and try again.' }) })
     : (req, res, next) => next();
 
+  app.get('/', (req, res) => res.json({ message: 'This is the default route of the backend', success: true }));
   app.get('/api/health', (req, res) => res.json({ status: 'ok', store: store.kind }));
 
   // Each browser sends a random session token; chats are only visible to their owner.

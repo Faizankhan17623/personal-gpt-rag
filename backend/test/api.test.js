@@ -118,3 +118,14 @@ test('bad input gets clear errors, and LLM failures arrive as stream errors', as
     assert.deepEqual(events.at(-1), { event: 'error', data: { error: 'The AI took too long to answer. Please try again.' } });
   } finally { await server.close(); }
 });
+
+test('the default route and health check need no session token', async () => {
+  const server = await startServer();
+  try {
+    const base = (await server.request('/health', { token: null }));
+    assert.deepEqual(base, { status: 200, body: { status: 'ok', store: 'memory' } });
+    const root = await fetch(server.url + '/');
+    assert.equal(root.status, 200);
+    assert.deepEqual(await root.json(), { message: 'This is the default route of the backend', success: true });
+  } finally { await server.close(); }
+});

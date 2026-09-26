@@ -65,7 +65,7 @@ export async function startServer(options = {}) {
     return { status: response.status, body };
   };
 
-  return { store, vectors, llm, request, close: () => new Promise(resolve => server.close(resolve)) };
+  return { store, vectors, llm, request, url: base.slice(0, -'/api'.length), close: () => new Promise(resolve => server.close(resolve)) };
 }
 
 function parseEvents(text) {
