@@ -30,7 +30,7 @@ The app reads the Pinecone index's dimension and adapts. `llama-text-embed-v2` p
 ## Project layout
 
 ```
-backend/                 Express API (Node 22+, ES modules)
+backend/                 Express API (Node 24, ES modules)
   src/server.js          starts the server
   src/app.js             routes, session tokens, rate limits, streaming
   src/prompts.js         the assistant's instructions (edit to change behaviour)
@@ -46,7 +46,7 @@ frontend/                React 19 + Redux Toolkit + Vite
 
 ## Setup
 
-You need Node.js 22+, and:
+You need Node.js 24, and:
 - **Pinecone:** a **dense, cosine** index with at least 384 dimensions. 1024 needs no padding; larger sizes such as 3000 work with padding.
 - **Groq:** an API key from https://console.groq.com/keys.
 - **MongoDB:** a connection string, only for deployment. A free MongoDB Atlas cluster works.
