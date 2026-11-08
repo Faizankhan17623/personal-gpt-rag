@@ -43,15 +43,15 @@ export default function Sidebar() {
         <nav className="chat-list">
           {filtered.length === 0 && <div className="empty-recents">{search ? "No matching chats" : "No chats yet"}</div>}
           {filtered.map((c) => (
-            <div
-              key={c.id}
-              className={`chat-item ${c.id === activeId ? "active" : ""}`}
-              onClick={() => { if (!streaming && c.id !== activeId) dispatch(openChat(c.id)); closeOnMobile(); }}
-            >
-              <span className="chat-title">
+            <div key={c.id} className={`chat-item ${c.id === activeId ? "active" : ""}`}>
+              <button
+                className="chat-title"
+                aria-current={c.id === activeId ? "page" : undefined}
+                onClick={() => { if (!streaming && c.id !== activeId) dispatch(openChat(c.id)); closeOnMobile(); }}
+              >
                 {c.document && <span className="doc-dot" title={c.document.name}>📄</span>}
                 {c.title}
-              </span>
+              </button>
               <button
                 className="del-btn"
                 title="Delete chat"

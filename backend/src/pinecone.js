@@ -72,7 +72,8 @@ export function createVectorStore({ pc, apiKey = settings().pineconeApiKey, inde
     }
   }
 
-  // Writes become visible asynchronously, so retry reads briefly.
+  // Writes become visible asynchronously, so wait briefly for them. If they are still not visible,
+  // carry on: they show up shortly, and failing here would leave the document unattached.
   async function verify(namespace, records, { attempts = 10, delayMs = 1500 } = {}) {
     const target = await index();
     for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -85,7 +86,6 @@ export function createVectorStore({ pc, apiKey = settings().pineconeApiKey, inde
       if (visible === records.length) return;
       if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
     }
-    throw new UserError('The document was uploaded but is not searchable yet. Try asking again in a minute.', 503);
   }
 
   async function query(namespace, vector, topK) {

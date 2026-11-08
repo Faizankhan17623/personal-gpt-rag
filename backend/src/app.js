@@ -7,8 +7,11 @@ import { UserError } from './errors.js';
 import { indexDocument } from './ingest.js';
 import { isSmallTalk, isFollowUp, cleanAnswer, retrieveSources, buildMessages } from './rag.js';
 import { streamCompletion } from './llm.js';
+import { makeTitle } from './store/shared.js';
 
 const MAX_MESSAGE_CHARS = 4000;
+// A chat is one MongoDB document (16 MB cap); ~25 KB per answer keeps 1000 messages well under it.
+const MAX_CHAT_MESSAGES = 1000;
 const SESSION_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
 const namespaceFor = chatId => `chat-${chatId}`;
 
@@ -67,7 +70,8 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
   });
 
   api.delete('/chats/:id', loadChat, async (req, res) => {
-    if (req.chat.document) await vectors.deleteNamespace(namespaceFor(req.chat.id));
+    // Always: a failed upload can leave vectors behind while chat.document is empty.
+    await vectors.deleteNamespace(namespaceFor(req.chat.id));
     await store.deleteChat(req.owner, req.params.id);
     res.json({ ok: true });
   });
@@ -80,10 +84,17 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
 
   api.post('/chats/:id/document', limit(10, 10), loadChat, upload.single('file'), async (req, res) => {
     if (!req.file) throw new UserError('Choose a file to upload.');
-    const document = await indexDocument(vectors, namespaceFor(req.chat.id), {
-      buffer: req.file.buffer,
-      filename: Buffer.from(req.file.originalname, 'latin1').toString('utf8'),
-    });
+    let document;
+    try {
+      document = await indexDocument(vectors, namespaceFor(req.chat.id), {
+        buffer: req.file.buffer,
+        filename: Buffer.from(req.file.originalname, 'latin1').toString('utf8'),
+      });
+    } catch (error) {
+      // Past file checks, the old document's vectors may already be gone: don't claim it is still attached.
+      if (!(error instanceof UserError)) await store.setDocument(req.owner, req.chat.id, null);
+      throw error;
+    }
     await store.setDocument(req.owner, req.chat.id, document);
     res.json({ document: { name: document.name, chunks: document.chunks } });
   });
@@ -101,6 +112,7 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
     if (message.length > MAX_MESSAGE_CHARS) throw new UserError(`Keep messages under ${MAX_MESSAGE_CHARS.toLocaleString()} characters.`);
 
     const { chat } = req;
+    if (chat.messages.length >= MAX_CHAT_MESSAGES) throw new UserError('This chat is full. Start a new chat or clear this one.');
     const smallTalk = isSmallTalk(message);
     const hasDocument = Boolean(chat.document);
     let sources = [];
@@ -123,7 +135,7 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
       const { text, truncated } = await complete(messages, token => send('token', { token }), { signal: aborted.signal });
       const content = cleanAnswer(text) + (truncated ? '\n\n*The answer reached its length limit. Ask a narrower follow-up for more.*' : '');
       const saved = await store.addMessage(req.owner, chat.id, { role: 'assistant', content, sources });
-      const title = (await store.getChat(req.owner, chat.id))?.title;
+      const title = chat.title === 'New chat' ? makeTitle(message) : chat.title;
       send('done', { message: saved, title });
     } catch (error) {
       if (!aborted.signal.aborted) {

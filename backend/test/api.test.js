@@ -123,9 +123,47 @@ test('the default route and health check need no session token', async () => {
   const server = await startServer();
   try {
     const base = (await server.request('/health', { token: null }));
-    assert.deepEqual(base, { status: 200, body: { status: 'ok', store: 'memory' } });
+    assert.deepEqual(base, { status: 200, body: { status: 'ok', store: server.store.kind } });
     const root = await fetch(server.url + '/');
     assert.equal(root.status, 200);
     assert.deepEqual(await root.json(), { message: 'This is the default route of the backend', success: true });
+  } finally { await server.close(); }
+});
+
+test('a failed upload never leaves a stale document, and deleting the chat still removes its vectors', async () => {
+  const server = await startServer();
+  try {
+    const { chat } = (await server.request('/chats', { method: 'POST' })).body;
+    await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('notes.txt', NOTES) });
+
+    // Pinecone fails after the old document's vectors were deleted.
+    server.vectors.upsert = async () => { throw new Error('Pinecone down'); };
+    const failed = await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('book.txt', 'Another document.') });
+    assert.equal(failed.status, 500);
+    assert.equal((await server.request(`/chats/${chat.id}`)).body.chat.document, null);
+
+    // Vectors left behind with no document recorded are still cleaned up.
+    server.vectors.namespaces.set(`chat-${chat.id}`, new Map([['orphan', {}]]));
+    await server.request(`/chats/${chat.id}`, { method: 'DELETE' });
+    assert.equal(server.vectors.namespaces.has(`chat-${chat.id}`), false);
+  } finally { await server.close(); }
+});
+
+test('oversized documents, broken Word files and full chats get clear errors', async () => {
+  const server = await startServer();
+  try {
+    const { chat } = (await server.request('/chats', { method: 'POST' })).body;
+    const long = await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('big.txt', 'a'.repeat(2_000_000)) });
+    assert.match(long.body.error, /too long/);
+    assert.equal(server.vectors.calls.embed.length, 0, 'nothing is embedded');
+
+    const docx = await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('old.docx', 'not a zip') });
+    assert.equal(docx.status, 400);
+    assert.match(docx.body.error, /Could not read this Word file/);
+
+    for (let i = 0; i < 1000; i++) await server.store.addMessage(server.token, chat.id, { role: 'user', content: 'x' });
+    const full = await server.request(`/chats/${chat.id}/messages`, { method: 'POST', json: { message: 'One more?' } });
+    assert.equal(full.status, 400);
+    assert.match(full.body.error, /chat is full/);
   } finally { await server.close(); }
 });

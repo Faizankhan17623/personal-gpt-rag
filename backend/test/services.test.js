@@ -65,6 +65,14 @@ test('embeddings keep input order and reject wrong index shapes', async () => {
   await assert.rejects(createVectorStore({ pc: fakePinecone(), indexName: '' }).deleteNamespace('x'), /PINECONE_INDEX_NAME/);
 });
 
+test('verify waits for slow writes but never fails the upload', async () => {
+  let fetches = 0;
+  const pc = fakePinecone();
+  pc.index = () => ({ fetch: async () => { fetches++; return { records: {} }; } });
+  await createVectorStore({ pc, indexName: 'test' }).verify('ns', [{ id: 'a' }], { attempts: 3, delayMs: 0 });
+  assert.equal(fetches, 3);
+});
+
 test('deleting a namespace that was never created is not an error', async () => {
   const pc = fakePinecone();
   await createVectorStore({ pc, indexName: 'test' }).deleteNamespace('missing');

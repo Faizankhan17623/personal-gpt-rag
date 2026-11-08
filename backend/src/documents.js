@@ -23,7 +23,13 @@ export async function extractText(buffer, filename) {
       await parser.destroy();
     }
   }
-  if (ext === '.docx') return (await mammoth.extractRawText({ buffer })).value;
+  if (ext === '.docx') {
+    try {
+      return (await mammoth.extractRawText({ buffer })).value;
+    } catch {
+      throw new UserError('Could not read this Word file. It may be damaged or not a real .docx file.');
+    }
+  }
   return buffer.toString('utf8');
 }
 

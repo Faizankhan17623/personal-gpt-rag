@@ -1,5 +1,7 @@
 import { createApp } from '../src/app.js';
+import { randomUUID } from 'node:crypto';
 import { createMemoryStore } from '../src/store/memoryStore.js';
+import { createMongoStore } from '../src/store/mongoStore.js';
 
 export const DIMENSIONS = 1024;
 export const vectorFor = (seed, length = DIMENSIONS) => Array.from({ length }, (_, i) => ((i * 31 + seed) % 97) / 97 + 0.01);
@@ -46,15 +48,18 @@ export function fakeComplete(answer = 'Linux is an operating system.') {
 }
 
 // Starts the app on a random port and returns a small fetch client.
+// Set TEST_MONGODB_URI (a throwaway database, never production) to run against MongoDB instead of memory.
 export async function startServer(options = {}) {
-  const store = options.store || createMemoryStore();
+  const mongoUri = process.env.TEST_MONGODB_URI?.trim();
+  const store = options.store || (mongoUri ? await createMongoStore(mongoUri) : createMemoryStore());
+  const ownToken = `test-session-${randomUUID()}`; // Unique per server, so tests never see each other's chats in a shared database.
   const vectors = options.vectors || fakeVectors();
   const llm = options.llm || fakeComplete();
   const app = createApp({ store, vectors, complete: llm.complete, rateLimits: false });
   const server = await new Promise(resolve => { const s = app.listen(0, () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}/api`;
 
-  const request = async (path, { token = 'test-session-token-aaaa', ...init } = {}) => {
+  const request = async (path, { token = ownToken, ...init } = {}) => {
     const response = await fetch(base + path, {
       ...init,
       headers: { ...(token ? { 'X-Session-Token': token } : {}), ...(init.json ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
@@ -65,7 +70,10 @@ export async function startServer(options = {}) {
     return { status: response.status, body };
   };
 
-  return { store, vectors, llm, request, url: base.slice(0, -'/api'.length), close: () => new Promise(resolve => server.close(resolve)) };
+  return { store, vectors, llm, request, token: ownToken, url: base.slice(0, -'/api'.length), close: async () => {
+    await new Promise(resolve => server.close(resolve));
+    await store.close();
+  } };
 }
 
 function parseEvents(text) {

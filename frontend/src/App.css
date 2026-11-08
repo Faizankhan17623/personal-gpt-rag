@@ -114,9 +114,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 10px;
+  padding-right: 10px;
   border-radius: 10px;
-  cursor: pointer;
   font-size: 14px;
 }
 .chat-item:hover {
@@ -126,6 +125,16 @@
   background: var(--active);
 }
 .chat-title {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -143,7 +152,8 @@
   opacity: 0;
   font-size: 13px;
 }
-.chat-item:hover .del-btn {
+.chat-item:hover .del-btn,
+.chat-item:focus-within .del-btn {
   opacity: 0.6;
 }
 .del-btn:hover {
