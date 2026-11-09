@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { newChat, uploadDoc, removeDoc, startTurn, appendToken, finishTurn, failTurn, showError } from "../store/chatSlice";
+import { newChat, uploadDoc, removeDoc, startTurn, appendToken, finishTurn, failTurn, stopTurn, showError } from "../store/chatSlice";
 import { streamChat } from "../api";
 import { createTypewriter } from "../typewriter";
 
@@ -38,7 +38,7 @@ export default function Composer() {
     dispatch(startTurn(message));
 
     // Smooth bursty network tokens into steady typing.
-    const typer = createTypewriter((chunk) => dispatch(appendToken(chunk)));
+    const typer = createTypewriter((text) => dispatch(appendToken({ id, text })));
     let done = null;
     let failure = null;
     await streamChat(id, message, {
@@ -46,6 +46,12 @@ export default function Composer() {
       onDone: (payload) => { done = payload; },
       onError: (error) => { failure = error; },
     });
+    if (!done && !failure) {
+      // Stopped because the user opened, started or deleted a chat.
+      typer.stop();
+      dispatch(stopTurn());
+      return;
+    }
     await typer.flush();
     if (done) dispatch(finishTurn(done));
     else dispatch(failTurn(failure?.message || "Something went wrong. Please try again."));

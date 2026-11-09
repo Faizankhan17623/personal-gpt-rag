@@ -56,8 +56,15 @@ export async function uploadDocument(id, file) {
   return (await request(`/chats/${id}/document`, { method: "POST", body: form })).document;
 }
 
+let activeStream = null;
+// Stops the answer that is streaming, e.g. when the user opens or starts another chat.
+export const stopStreaming = () => activeStream?.abort();
+
 // Streams an answer: onToken(text) per piece, onDone({ message, title }) at the end.
-export async function streamChat(id, message, { onToken, onDone, onError, signal }) {
+// Calls neither onDone nor onError when stopped with stopStreaming.
+export async function streamChat(id, message, { onToken, onDone, onError }) {
+  activeStream = new AbortController();
+  const { signal } = activeStream;
   let response;
   try {
     response = await fetch(`${BASE}/chats/${id}/messages`, {
@@ -73,7 +80,7 @@ export async function streamChat(id, message, { onToken, onDone, onError, signal
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    onError(new Error(data.error || `Request failed (${response.status}).`));
+    if (!signal.aborted) onError(new Error(data.error || `Request failed (${response.status}).`));
     return;
   }
 

@@ -44,7 +44,7 @@ function MemoryPanel() {
 
 export default function Sidebar() {
   const dispatch = useDispatch();
-  const { chats, activeId, search, sidebarOpen, streaming } = useSelector((s) => s.chat);
+  const { chats, activeId, search, sidebarOpen } = useSelector((s) => s.chat);
 
   const filtered = chats.filter((c) => (c.title || "").toLowerCase().includes(search.toLowerCase()));
   const closeOnMobile = () => {
@@ -55,7 +55,7 @@ export default function Sidebar() {
     return (
       <div className="sidebar collapsed">
         <button className="icon-btn" title="Open sidebar" onClick={() => dispatch(toggleSidebar())}>☰</button>
-        <button className="icon-btn" title="New chat" disabled={streaming} onClick={() => dispatch(newChat())}>✎</button>
+        <button className="icon-btn" title="New chat" onClick={() => dispatch(newChat())}>✎</button>
       </div>
     );
   }
@@ -69,7 +69,7 @@ export default function Sidebar() {
           <button className="icon-btn" title="Close sidebar" onClick={() => dispatch(toggleSidebar())}>⟨</button>
         </div>
 
-        <button className="new-chat-btn" disabled={streaming} onClick={() => { dispatch(newChat()); closeOnMobile(); }}>
+        <button className="new-chat-btn" onClick={() => { dispatch(newChat()); closeOnMobile(); }}>
           <span className="ic">✎</span> New chat
         </button>
 
@@ -87,7 +87,7 @@ export default function Sidebar() {
               <button
                 className="chat-title"
                 aria-current={c.id === activeId ? "page" : undefined}
-                onClick={() => { if (!streaming && c.id !== activeId) dispatch(openChat(c.id)); closeOnMobile(); }}
+                onClick={() => { if (c.id !== activeId) dispatch(openChat(c.id)); closeOnMobile(); }}
               >
                 {c.document && <span className="doc-dot" title={c.document.name}>📄</span>}
                 {c.title}
@@ -95,7 +95,6 @@ export default function Sidebar() {
               <button
                 className="del-btn"
                 title="Delete chat"
-                disabled={streaming}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (window.confirm(`Delete "${c.title}"? This also deletes its document.`)) dispatch(removeChat(c.id));

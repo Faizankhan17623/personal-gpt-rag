@@ -4,7 +4,7 @@
 // jumping in clumps.
 //
 // Usage:
-//   const tw = createTypewriter((chunk) => dispatch(appendToken(chunk)));
+//   const tw = createTypewriter((text) => dispatch(appendToken({ id, text })));
 //   tw.push("some text");   // feed tokens as they arrive
 //   await tw.flush();        // call when the stream is done (drains the rest)
 export function createTypewriter(onChunk, { charsPerTick = 2, tickMs = 16 } = {}) {
@@ -38,6 +38,12 @@ export function createTypewriter(onChunk, { charsPerTick = 2, tickMs = 16 } = {}
       if (!text) return;
       queue += text;
       ensureRunning();
+    },
+    // Drops anything not shown yet, when the user leaves the chat mid-answer.
+    stop() {
+      clearInterval(timer);
+      timer = null;
+      queue = "";
     },
     // Resolves once everything queued has been revealed.
     flush() {

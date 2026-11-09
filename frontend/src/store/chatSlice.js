@@ -2,9 +2,17 @@ import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import * as api from "../api";
 
 export const fetchChats = createAsyncThunk("chat/fetchChats", () => api.listChats());
-export const newChat = createAsyncThunk("chat/newChat", () => api.createChat());
-export const openChat = createAsyncThunk("chat/openChat", (id) => api.getChat(id));
-export const removeChat = createAsyncThunk("chat/removeChat", async (id) => {
+// Leaving the open chat stops its answer, so a stuck or slow answer never blocks the sidebar.
+export const newChat = createAsyncThunk("chat/newChat", () => {
+  api.stopStreaming();
+  return api.createChat();
+});
+export const openChat = createAsyncThunk("chat/openChat", (id) => {
+  api.stopStreaming();
+  return api.getChat(id);
+});
+export const removeChat = createAsyncThunk("chat/removeChat", async (id, { getState }) => {
+  if (getState().chat.activeId === id) api.stopStreaming();
   await api.deleteChat(id);
   return id;
 });
@@ -61,8 +69,13 @@ const slice = createSlice({
       );
     },
     appendToken(state, action) {
+      const { id, text } = action.payload;
+      if (state.activeId !== id) return; // The user has moved to another chat.
       const last = state.messages.at(-1);
-      if (last?.role === "assistant") last.content += action.payload;
+      if (last?.role === "assistant") last.content += text;
+    },
+    stopTurn(state) {
+      state.streaming = false;
     },
     // Replace the streamed text with the saved, cleaned answer and its sources.
     finishTurn(state, action) {
@@ -148,5 +161,5 @@ const slice = createSlice({
   },
 });
 
-export const { setSearch, toggleSidebar, dismissError, showError, startTurn, appendToken, finishTurn, failTurn } = slice.actions;
+export const { setSearch, toggleSidebar, dismissError, showError, startTurn, appendToken, finishTurn, failTurn, stopTurn } = slice.actions;
 export default slice.reducer;
