@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chunkText, extractText } from '../src/documents.js';
-import { buildRecords } from '../src/ingest.js';
+import { buildRecords, useDailyBudget, DAILY_CHUNK_BUDGET } from '../src/ingest.js';
 import { isSmallTalk, isFollowUp, cleanAnswer, buildMessages, retrieveSources } from '../src/rag.js';
 import { fakeVectors, vectorFor } from './helpers.js';
 
@@ -64,4 +64,10 @@ test('retrieval embeds the query (with the previous question for follow-ups)', a
   assert.equal(vectors.calls.embed[0].inputType, 'query');
   assert.equal(vectors.calls.embed[0].texts[0], 'What is ls?\ngive an example');
   assert.deepEqual(sources.map(s => [s.number, s.chunk, s.text]), [[1, 1, 'ls lists files'], [2, 2, 'cd changes directory']]);
+});
+
+test('the daily upload budget is shared by everyone and resets each day', () => {
+  useDailyBudget(DAILY_CHUNK_BUDGET, '2000-01-01');
+  assert.throws(() => useDailyBudget(1, '2000-01-01'), { status: 429, message: /today's upload limit/ });
+  useDailyBudget(1, '2000-01-02');
 });

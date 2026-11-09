@@ -91,11 +91,12 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
         filename: Buffer.from(req.file.originalname, 'latin1').toString('utf8'),
       });
     } catch (error) {
-      // Past file checks, the old document's vectors may already be gone: don't claim it is still attached.
-      if (!(error instanceof UserError)) await store.setDocument(req.owner, req.chat.id, null);
+      // The old document's vectors may be gone: don't claim it is still attached.
+      if (error.documentCleared) await store.setDocument(req.owner, req.chat.id, null);
       throw error;
     }
-    await store.setDocument(req.owner, req.chat.id, document);
+    // The chat was deleted during the upload: don't leave its vectors behind.
+    if (!(await store.setDocument(req.owner, req.chat.id, document))) await vectors.deleteNamespace(namespaceFor(req.chat.id));
     res.json({ document: { name: document.name, chunks: document.chunks } });
   });
 
@@ -135,6 +136,7 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
       const { text, truncated } = await complete(messages, token => send('token', { token }), { signal: aborted.signal });
       const content = cleanAnswer(text) + (truncated ? '\n\n*The answer reached its length limit. Ask a narrower follow-up for more.*' : '');
       const saved = await store.addMessage(req.owner, chat.id, { role: 'assistant', content, sources });
+      if (!saved) throw new UserError('This chat was deleted.');
       const title = chat.title === 'New chat' ? makeTitle(message) : chat.title;
       send('done', { message: saved, title });
     } catch (error) {

@@ -3,7 +3,19 @@ import { EMBEDDING_MODEL } from './config.js';
 import { extractText, chunkText } from './documents.js';
 import { UserError } from './errors.js';
 
-const MAX_CHUNKS = 2000;
+// Pinecone Starter allows llama-text-embed-v2 250,000 tokens a minute and 5 million a month.
+// A chunk is ~250 tokens, so 800 chunks (~200k tokens) embed without hitting the per-minute limit,
+// and 2000 chunks a day (~500k tokens, a tenth of the month) stops one visitor spending the month.
+const MAX_CHUNKS = 800;
+export const DAILY_CHUNK_BUDGET = 2000;
+
+// shortcut: per-process and reset on restart; move to MongoDB if you run more than one server.
+const budget = { day: '', used: 0 };
+export function useDailyBudget(chunks, today = new Date().toISOString().slice(0, 10)) {
+  if (budget.day !== today) Object.assign(budget, { day: today, used: 0 });
+  if (budget.used + chunks > DAILY_CHUNK_BUDGET) throw new UserError('The server has reached today\'s upload limit. Please try again tomorrow.', 429);
+  budget.used += chunks;
+}
 
 // IDs depend only on the document contents, so re-uploading the same file overwrites its records.
 export function buildRecords(chunks, vectors, filename) {
@@ -24,13 +36,18 @@ export async function indexDocument(vectors, namespace, { buffer, filename }) {
   if (!text) throw new UserError('No readable text was found in this file. Scanned PDFs need OCR first.');
 
   const chunks = chunkText(text);
-  // Bounds memory (~2000 vectors) and embedding quota per upload.
-  if (chunks.length > MAX_CHUNKS) throw new UserError('This document is too long. Upload a shorter file (about 1,500 pages of text at most).');
+  if (chunks.length > MAX_CHUNKS) throw new UserError('This document is too long. Upload a shorter file (about 300 pages of text at most).');
+  useDailyBudget(chunks.length);
   const embeddings = await vectors.embed(chunks, 'passage');
   const { documentId, records } = buildRecords(chunks, embeddings, filename);
 
-  await vectors.deleteNamespace(namespace);
-  await vectors.upsert(namespace, records);
+  try {
+    await vectors.deleteNamespace(namespace);
+    await vectors.upsert(namespace, records);
+  } catch (error) {
+    error.documentCleared = true; // The old document's vectors may be gone.
+    throw error;
+  }
   await vectors.verify(namespace, records);
   return { name: filename, documentId, chunks: records.length, characters: text.length };
 }

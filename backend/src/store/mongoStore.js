@@ -35,7 +35,7 @@ export async function createMongoStore(uri) {
   return {
     kind: 'mongo',
     async listChats(owner) {
-      const chats = await Chat.find({ owner }, { messages: 0 }).sort({ updatedAt: -1 }).limit(200).lean();
+      const chats = await Chat.find({ owner }, { messages: 0 }).sort({ updatedAt: -1 }).lean();
       return chats.map(chat => summarize(toChat(chat)));
     },
     async getChat(owner, id) {

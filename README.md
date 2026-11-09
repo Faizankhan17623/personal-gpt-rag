@@ -11,7 +11,7 @@ A ChatGPT-style web app: attach a PDF, Word (.docx), TXT or Markdown file to a c
 - **Small talk:** greetings and personal questions skip document search and get short, friendly replies from "Claire".
 - **Follow-ups:** questions like "tell me more" or "give an example" are searched together with the previous question.
 - **Privacy:** each browser gets a random session token, and chats are only visible to it.
-- **Protection:** rate limits on chat, upload and chat creation; CORS limited to your frontend; 15 MB upload limit.
+- **Protection:** rate limits on chat, upload and chat creation; CORS limited to your frontend; 15 MB upload limit; documents up to about 300 pages; a daily upload budget (2,000 chunks) so one visitor cannot use up Pinecone's free monthly embedding allowance.
 - **Layout:** works on phones, with light and dark mode.
 
 ## How it works

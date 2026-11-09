@@ -167,3 +167,39 @@ test('oversized documents, broken Word files and full chats get clear errors', a
     assert.match(full.body.error, /chat is full/);
   } finally { await server.close(); }
 });
+
+test('a failed embedding keeps the old document; a chat deleted mid-upload or mid-answer leaves nothing behind', async () => {
+  const deleting = { calls: [], complete: async (messages, onToken) => {
+    await server.store.deleteChat(server.token, deleting.chatId);
+    onToken('Partial answer');
+    return { text: 'Partial answer', truncated: false };
+  } };
+  const server = await startServer({ llm: deleting });
+  try {
+    const { chat } = (await server.request('/chats', { method: 'POST' })).body;
+    await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('notes.txt', NOTES) });
+
+    // Embedding fails before anything is deleted: notes.txt stays attached and searchable.
+    const embed = server.vectors.embed;
+    server.vectors.embed = async () => { throw new Error('Rate limited'); };
+    assert.equal((await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('book.txt', 'Another document.') })).status, 500);
+    assert.equal((await server.request(`/chats/${chat.id}`)).body.chat.document.name, 'notes.txt');
+    assert.equal(server.vectors.namespaces.has(`chat-${chat.id}`), true);
+    server.vectors.embed = embed;
+
+    // The chat is deleted while its upload is saving.
+    const upsert = server.vectors.upsert;
+    server.vectors.upsert = async (namespace, records) => {
+      await server.store.deleteChat(server.token, chat.id);
+      await upsert(namespace, records);
+    };
+    await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('book.txt', 'Another document.') });
+    assert.equal(server.vectors.namespaces.has(`chat-${chat.id}`), false);
+    server.vectors.upsert = upsert;
+
+    // The chat is deleted while its answer is streaming.
+    deleting.chatId = (await server.request('/chats', { method: 'POST' })).body.chat.id;
+    const events = (await server.request(`/chats/${deleting.chatId}/messages`, { method: 'POST', json: { message: 'What is Linux?' } })).body;
+    assert.deepEqual(events.at(-1), { event: 'error', data: { error: 'This chat was deleted.' } });
+  } finally { await server.close(); }
+});
