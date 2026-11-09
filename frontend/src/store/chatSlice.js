@@ -16,6 +16,9 @@ export const uploadDoc = createAsyncThunk("chat/uploadDoc", async ({ id, file })
   id,
   document: await api.uploadDocument(id, file),
 }));
+export const fetchMemories = createAsyncThunk("chat/fetchMemories", () => api.listMemories());
+export const forgetMemory = createAsyncThunk("chat/forgetMemory", (id) => api.deleteMemory(id));
+export const forgetAllMemories = createAsyncThunk("chat/forgetAllMemories", () => api.clearMemories());
 export const removeDoc = createAsyncThunk("chat/removeDoc", async (id) => {
   await api.removeDocument(id);
   return id;
@@ -28,6 +31,7 @@ const slice = createSlice({
     activeId: null,
     messages: [], // active chat: { id, role, content, sources }
     activeDocument: null, // { name, chunks }
+    memories: [], // facts remembered across chats: { id, text, createdAt }
     streaming: false,
     uploading: false,
     error: null,
@@ -63,8 +67,10 @@ const slice = createSlice({
     // Replace the streamed text with the saved, cleaned answer and its sources.
     finishTurn(state, action) {
       state.streaming = false;
-      const { message, title } = action.payload;
-      state.messages[state.messages.length - 1] = message;
+      const { message, title, memories } = action.payload;
+      // memories only comes back when this message changed them.
+      state.messages[state.messages.length - 1] = { ...message, memoryUpdated: Boolean(memories) };
+      if (memories) state.memories = memories;
       const chat = state.chats.find((c) => c.id === state.activeId);
       if (chat) {
         if (title) chat.title = title;
@@ -128,7 +134,17 @@ const slice = createSlice({
         const chat = state.chats.find((c) => c.id === action.payload);
         if (chat) chat.document = null;
       })
-      .addCase(removeDoc.rejected, fail);
+      .addCase(removeDoc.rejected, fail)
+      .addMatcher(
+        (action) => [fetchMemories.fulfilled, forgetMemory.fulfilled, forgetAllMemories.fulfilled].some((thunk) => thunk.match(action)),
+        (state, action) => {
+          state.memories = action.payload;
+        }
+      )
+      .addMatcher(
+        (action) => [fetchMemories.rejected, forgetMemory.rejected, forgetAllMemories.rejected].some((thunk) => thunk.match(action)),
+        fail
+      );
   },
 });
 

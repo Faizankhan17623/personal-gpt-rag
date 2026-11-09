@@ -167,6 +167,65 @@
   }
 }
 
+/* Memory: facts remembered across chats, at the bottom of the sidebar. */
+.memory-panel {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 6px;
+}
+.memory-caret {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+.memory-body {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.memory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.memory-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.memory-item:hover {
+  background: var(--hover);
+}
+.memory-item span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.memory-del,
+.memory-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.memory-del:hover,
+.memory-clear:hover {
+  color: var(--text);
+}
+.memory-clear {
+  padding: 6px 10px;
+  text-decoration: underline;
+}
+.memory-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* ============ CHAT WINDOW ============ */
 .chat-window {
   flex: 1;

@@ -10,8 +10,9 @@ A ChatGPT-style web app: attach a PDF, Word (.docx), TXT or Markdown file to a c
 - **Streaming:** answers type out as they arrive (Groq `openai/gpt-oss-120b`), with Markdown, tables and code blocks.
 - **Small talk:** greetings and personal questions skip document search and get short, friendly replies from "Claire".
 - **Follow-ups:** questions like "tell me more" or "give an example" are searched together with the previous question.
+- **Memory:** like ChatGPT, the assistant remembers what you tell it about yourself (name, studies, preferences, or anything you ask it to remember) and uses it in every chat. A small model (`openai/gpt-oss-20b`) picks out the facts while the answer streams, and replaces old ones when they change ("I moved to Pune"). **Memory** at the bottom of the sidebar lists them, with a button to forget each one or all of them. It never stores passwords or similar secrets, and it never learns from document content.
 - **Privacy:** each browser gets a random session token, and chats are only visible to it.
-- **Protection:** rate limits on chat, upload and chat creation; CORS limited to your frontend; 15 MB upload limit; documents up to about 300 pages; a daily upload budget (2,000 chunks) so one visitor cannot use up Pinecone's free monthly embedding allowance.
+- **Protection:** rate limits on chat, upload and chat creation; CORS limited to your frontend; 15 MB upload limit; documents up to about 300 pages; a daily upload budget (2,000 chunks, kept in MongoDB so it survives restarts) so one visitor cannot use up Pinecone's free monthly embedding allowance; one upload at a time per chat.
 - **Layout:** works on phones, with light and dark mode.
 
 ## How it works
@@ -35,11 +36,12 @@ backend/                 Express API (Node 24, ES modules)
   src/app.js             routes, session tokens, rate limits, streaming
   src/prompts.js         the assistant's instructions (edit to change behaviour)
   src/rag.js             small-talk detection, retrieval, prompt building
+  src/memory.js          picks out facts to remember about the user across chats
   src/llm.js             Groq streaming client
   src/pinecone.js        embeddings, upsert/verify, query, namespace deletion
   src/ingest.js          file → chunks → vectors
   src/documents.js       text extraction and chunking
-  src/store/             chats in MongoDB, or in memory when MONGODB_URI is empty
+  src/store/             chats, memories and the upload budget in MongoDB, or in memory when MONGODB_URI is empty
   test/                  offline tests (Pinecone and Groq are faked)
 frontend/                React 19 + Redux Toolkit + Vite
 ```

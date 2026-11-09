@@ -8,6 +8,7 @@ import { indexDocument } from './ingest.js';
 import { isSmallTalk, isFollowUp, cleanAnswer, retrieveSources, buildMessages } from './rag.js';
 import { streamCompletion } from './llm.js';
 import { makeTitle } from './store/shared.js';
+import { mayHoldMemory, extractMemories, applyMemoryChanges } from './memory.js';
 
 const MAX_MESSAGE_CHARS = 4000;
 // A chat is one MongoDB document (16 MB cap); ~25 KB per answer keeps 1000 messages well under it.
@@ -15,8 +16,9 @@ const MAX_CHAT_MESSAGES = 1000;
 const SESSION_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
 const namespaceFor = chatId => `chat-${chatId}`;
 
-// store: chat storage, vectors: Pinecone wrapper, complete: LLM streaming function.
-export function createApp({ store, vectors, complete = streamCompletion, corsOrigins = [], rateLimits = true }) {
+// store: chat storage, vectors: Pinecone wrapper, complete: LLM streaming function,
+// remember: picks facts about the user out of a message.
+export function createApp({ store, vectors, complete = streamCompletion, remember = extractMemories, corsOrigins = [], rateLimits = true }) {
   const app = express();
   app.set('trust proxy', 1);
   app.use(cors({
@@ -25,6 +27,7 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
   }));
   app.use(express.json({ limit: '100kb' }));
 
+  const uploading = new Set(); // shortcut: chat ids being indexed in this process; share it if you run more than one server.
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
   const limit = (windowMinutes, limit) => rateLimits
     ? rateLimit({ windowMs: windowMinutes * 60 * 1000, limit, standardHeaders: 'draft-8', legacyHeaders: false,
@@ -62,13 +65,6 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
     res.json({ chat });
   });
 
-  api.patch('/chats/:id', loadChat, async (req, res) => {
-    const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 80) : '';
-    if (!title) throw new UserError('Enter a title.');
-    await store.renameChat(req.owner, req.params.id, title);
-    res.json({ ok: true, title });
-  });
-
   api.delete('/chats/:id', loadChat, async (req, res) => {
     // Always: a failed upload can leave vectors behind while chat.document is empty.
     await vectors.deleteNamespace(namespaceFor(req.chat.id));
@@ -84,9 +80,12 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
 
   api.post('/chats/:id/document', limit(10, 10), loadChat, upload.single('file'), async (req, res) => {
     if (!req.file) throw new UserError('Choose a file to upload.');
+    // Two uploads at once would interleave their delete and store steps and mix both files' chunks.
+    if (uploading.has(req.chat.id)) throw new UserError('An upload is already running for this chat.', 409);
+    uploading.add(req.chat.id);
     let document;
     try {
-      document = await indexDocument(vectors, namespaceFor(req.chat.id), {
+      document = await indexDocument(vectors, store, namespaceFor(req.chat.id), {
         buffer: req.file.buffer,
         filename: Buffer.from(req.file.originalname, 'latin1').toString('utf8'),
       });
@@ -94,6 +93,8 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
       // The old document's vectors may be gone: don't claim it is still attached.
       if (error.documentCleared) await store.setDocument(req.owner, req.chat.id, null);
       throw error;
+    } finally {
+      uploading.delete(req.chat.id);
     }
     // The chat was deleted during the upload: don't leave its vectors behind.
     if (!(await store.setDocument(req.owner, req.chat.id, document))) await vectors.deleteNamespace(namespaceFor(req.chat.id));
@@ -124,7 +125,8 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
         : '';
       sources = await retrieveSources(vectors, namespaceFor(chat.id), message, previous);
     }
-    const messages = buildMessages({ message, history: chat.messages, sources, smallTalk, hasDocument });
+    const memories = await store.getMemories(req.owner);
+    const messages = buildMessages({ message, history: chat.messages, sources, smallTalk, hasDocument, memories });
     await store.addMessage(req.owner, chat.id, { role: 'user', content: message });
 
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
@@ -132,13 +134,24 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
     const aborted = new AbortController();
     res.on('close', () => aborted.abort());
 
+    // Picks out facts to remember while the answer streams, so it adds no waiting. Failing only skips remembering.
+    const remembering = !smallTalk && mayHoldMemory(message)
+      ? remember(message, memories, { signal: aborted.signal }).catch(error => {
+        if (!aborted.signal.aborted) console.error('Remembering failed:', error.message);
+        return null;
+      })
+      : null;
+
     try {
       const { text, truncated } = await complete(messages, token => send('token', { token }), { signal: aborted.signal });
       const content = cleanAnswer(text) + (truncated ? '\n\n*The answer reached its length limit. Ask a narrower follow-up for more.*' : '');
       const saved = await store.addMessage(req.owner, chat.id, { role: 'assistant', content, sources });
       if (!saved) throw new UserError('This chat was deleted.');
       const title = chat.title === 'New chat' ? makeTitle(message) : chat.title;
-      send('done', { message: saved, title });
+      const changes = await remembering;
+      const updated = changes && applyMemoryChanges(memories, changes);
+      if (updated) await store.setMemories(req.owner, updated);
+      send('done', { message: saved, title, ...(updated && { memories: updated }) });
     } catch (error) {
       if (!aborted.signal.aborted) {
         if (!(error instanceof UserError)) console.error('Chat failed:', error);
@@ -146,6 +159,20 @@ export function createApp({ store, vectors, complete = streamCompletion, corsOri
       }
     }
     res.end();
+  });
+
+  // Facts remembered about this session's user, shared by all of their chats.
+  api.get('/memories', async (req, res) => {
+    res.json({ memories: await store.getMemories(req.owner) });
+  });
+
+  api.delete('/memories/:id', async (req, res) => {
+    const memories = (await store.getMemories(req.owner)).filter(memory => memory.id !== req.params.id);
+    res.json({ memories: await store.setMemories(req.owner, memories) });
+  });
+
+  api.delete('/memories', async (req, res) => {
+    res.json({ memories: await store.setMemories(req.owner, []) });
   });
 
   app.use('/api', api);

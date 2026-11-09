@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { startServer, upload, fakeComplete } from './helpers.js';
+import { DAILY_CHUNK_BUDGET } from '../src/ingest.js';
 
 const NOTES = 'Linux is an operating system. The ls command lists files. The cd command changes directory.';
 
@@ -111,8 +113,6 @@ test('bad input gets clear errors, and LLM failures arrive as stream errors', as
     const { chat } = (await server.request('/chats', { method: 'POST' })).body;
     assert.equal((await server.request(`/chats/${chat.id}/messages`, { method: 'POST', json: { message: '  ' } })).status, 400);
     assert.match((await server.request(`/chats/${chat.id}/messages`, { method: 'POST', json: { message: 'x'.repeat(4001) } })).body.error, /4,000/);
-    assert.equal((await server.request(`/chats/${chat.id}`, { method: 'PATCH', json: { title: '' } })).status, 400);
-    assert.equal((await server.request(`/chats/${chat.id}`, { method: 'PATCH', json: { title: 'Linux notes' } })).body.title, 'Linux notes');
 
     const events = (await server.request(`/chats/${chat.id}/messages`, { method: 'POST', json: { message: 'Hi there, what is Linux?' } })).body;
     assert.deepEqual(events.at(-1), { event: 'error', data: { error: 'The AI took too long to answer. Please try again.' } });
@@ -201,5 +201,86 @@ test('a failed embedding keeps the old document; a chat deleted mid-upload or mi
     deleting.chatId = (await server.request('/chats', { method: 'POST' })).body.chat.id;
     const events = (await server.request(`/chats/${deleting.chatId}/messages`, { method: 'POST', json: { message: 'What is Linux?' } })).body;
     assert.deepEqual(events.at(-1), { event: 'error', data: { error: 'This chat was deleted.' } });
+  } finally { await server.close(); }
+});
+
+test('the assistant remembers facts across chats, and the user can forget them', async () => {
+  const seen = [];
+  const remember = async (message, memories) => {
+    seen.push(message);
+    if (/Sam/.test(message)) return { add: ["The user's name is Sam."], forget: [] };
+    if (/Delhi/.test(message)) return { add: ['The user lives in Delhi.'], forget: [] };
+    if (/Pune/.test(message)) return { add: ['The user lives in Pune.'], forget: [memories.findIndex(m => /Delhi/.test(m.text)) + 1] };
+    throw new Error('Groq down');
+  };
+  const server = await startServer({ remember });
+  try {
+    const ask = async (message) => {
+      const { chat } = (await server.request('/chats', { method: 'POST' })).body;
+      return (await server.request(`/chats/${chat.id}/messages`, { method: 'POST', json: { message } })).body.at(-1);
+    };
+    assert.deepEqual((await ask('My name is Sam')).data.memories.map(m => m.text), ["The user's name is Sam."]);
+    await ask('I live in Delhi');
+    assert.equal((await ask('hello')).data.memories, undefined, 'small talk skips remembering');
+    assert.equal((await ask('What is Linux?')).data.memories, undefined, 'nothing about the user: no extra AI call');
+    const moved = await ask('I moved to Pune');
+    assert.deepEqual(moved.data.memories.map(m => m.text), ["The user's name is Sam.", 'The user lives in Pune.']);
+    const failed = await ask('I like tea');
+    assert.equal(failed.event, 'done', 'a failed memory call does not break the answer');
+    assert.deepEqual(seen, ['My name is Sam', 'I live in Delhi', 'I moved to Pune', 'I like tea']);
+
+    // A new chat gets the saved facts, not the forgotten one.
+    await ask('What is Linux?');
+    const context = server.llm.calls.at(-1).map(m => m.content).join('\n');
+    assert.match(context, /name is Sam/);
+    assert.match(context, /lives in Pune/);
+    assert.doesNotMatch(context, /Delhi/);
+
+    const { memories } = (await server.request('/memories')).body;
+    assert.equal(memories.length, 2);
+    assert.deepEqual((await server.request('/memories', { token: 'another-session-token-bbbb' })).body.memories, []);
+    assert.equal((await server.request(`/memories/${memories[0].id}`, { method: 'DELETE' })).body.memories.length, 1);
+    assert.deepEqual((await server.request('/memories', { method: 'DELETE' })).body.memories, []);
+    assert.deepEqual((await server.request('/memories')).body.memories, []);
+  } finally { await server.close(); }
+});
+
+test('the daily upload budget lives in the store, so restarts do not reset it', async () => {
+  const server = await startServer();
+  try {
+    const day = `test-${randomUUID()}`; // Never today, so a shared test database's real budget is untouched.
+    assert.equal(await server.store.useBudget(day, 6, 10), true);
+    assert.equal(await server.store.useBudget(day, 6, 10), false);
+    assert.equal(await server.store.useBudget(day, 4, 10), true, 'a refused upload is not counted');
+    assert.equal(await server.store.useBudget(`${day}-next`, DAILY_CHUNK_BUDGET, DAILY_CHUNK_BUDGET), true, 'each day starts fresh');
+
+    const { chat } = (await server.request('/chats', { method: 'POST' })).body;
+    const useBudget = server.store.useBudget;
+    server.store.useBudget = async () => false;
+    const refused = await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('notes.txt', NOTES) });
+    server.store.useBudget = useBudget;
+    assert.equal(refused.status, 429);
+    assert.match(refused.body.error, /today's upload limit/);
+  } finally { await server.close(); }
+});
+
+test('a second upload to the same chat is refused while the first is running', async () => {
+  const server = await startServer();
+  try {
+    const { chat } = (await server.request('/chats', { method: 'POST' })).body;
+    const embed = server.vectors.embed;
+    let entered, release;
+    const inside = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    server.vectors.embed = async (...args) => { entered(); await gate; return embed(...args); };
+
+    const first = server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('notes.txt', NOTES) });
+    await inside;
+    const second = await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('book.txt', 'Another document.') });
+    assert.equal(second.status, 409);
+    release();
+    assert.equal((await first).status, 200);
+    server.vectors.embed = embed;
+    assert.equal((await server.request(`/chats/${chat.id}/document`, { method: 'POST', body: upload('book.txt', 'Another document.') })).status, 200, 'free again afterwards');
   } finally { await server.close(); }
 });

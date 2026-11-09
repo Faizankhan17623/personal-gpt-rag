@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { streamCompletion } from '../src/llm.js';
+import { extractMemories, MEMORY_MODEL } from '../src/memory.js';
 import { createVectorStore } from '../src/pinecone.js';
 import { vectorFor } from './helpers.js';
 
@@ -91,4 +92,23 @@ test('larger indexes get zero-padded embeddings (e.g. 2048 + 952 for 3000)', asy
   const [plain] = await createVectorStore({ pc: exact, indexName: 'test' }).embed(['a'], 'query');
   assert.equal(exact.calls.embedDimension, 1024);
   assert.equal(plain.length, 1024);
+});
+
+test('memory extraction asks the small model for JSON and drops anything malformed', async () => {
+  let body;
+  const reply = content => ({ ok: true, json: async () => ({ choices: [{ message: { content } }] }) });
+  const result = await extractMemories('My name is Sam', [{ text: 'The user likes tea.' }], {
+    apiKey: 'test-key',
+    fetchImpl: async (url, init) => {
+      body = JSON.parse(init.body);
+      return reply(JSON.stringify({ add: ["The user's name is Sam.", 42, '  ', 'x'.repeat(500)], forget: [1, '2'] }));
+    },
+  });
+  assert.equal(body.model, MEMORY_MODEL);
+  assert.deepEqual(body.response_format, { type: 'json_object' });
+  assert.deepEqual(JSON.parse(body.messages[1].content), { saved: [{ number: 1, text: 'The user likes tea.' }], message: 'My name is Sam' });
+  assert.deepEqual(result, { add: ["The user's name is Sam.", 'x'.repeat(200)], forget: [1] });
+
+  assert.deepEqual(await extractMemories('hi', [], { apiKey: 'k', fetchImpl: async () => reply('{"add": "not a list"}') }), { add: [], forget: [] });
+  await assert.rejects(extractMemories('hi', [], { apiKey: 'k', fetchImpl: async () => ({ ok: false, status: 429 }) }), /HTTP 429/);
 });

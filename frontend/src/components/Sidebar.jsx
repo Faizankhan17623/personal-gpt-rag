@@ -1,6 +1,46 @@
+import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { newChat, openChat, removeChat, setSearch, toggleSidebar } from "../store/chatSlice";
+import { newChat, openChat, removeChat, setSearch, toggleSidebar, forgetMemory, forgetAllMemories } from "../store/chatSlice";
 import { APP_NAME } from "../config";
+
+// What the assistant remembers about the user across chats, with ways to forget it.
+function MemoryPanel() {
+  const dispatch = useDispatch();
+  const memories = useSelector((s) => s.chat.memories);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="memory-panel">
+      <button className="new-chat-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="ic">🧠</span> Memory ({memories.length})
+        <span className="memory-caret">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="memory-body">
+          {memories.length === 0 ? (
+            <div className="empty-recents">Nothing yet. Tell me about yourself and I'll remember it in every chat.</div>
+          ) : (
+            <>
+              <ul className="memory-list">
+                {memories.map((m) => (
+                  <li key={m.id} className="memory-item">
+                    <span>{m.text}</span>
+                    <button className="memory-del" title="Forget this" aria-label={`Forget: ${m.text}`} onClick={() => dispatch(forgetMemory(m.id))}>✕</button>
+                  </li>
+                ))}
+              </ul>
+              <button
+                className="memory-clear"
+                onClick={() => { if (window.confirm("Forget everything in memory?")) dispatch(forgetAllMemories()); }}
+              >
+                Forget all
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const dispatch = useDispatch();
@@ -66,6 +106,8 @@ export default function Sidebar() {
             </div>
           ))}
         </nav>
+
+        <MemoryPanel />
       </aside>
     </>
   );

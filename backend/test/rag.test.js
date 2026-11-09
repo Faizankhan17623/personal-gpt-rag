@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chunkText, extractText } from '../src/documents.js';
-import { buildRecords, useDailyBudget, DAILY_CHUNK_BUDGET } from '../src/ingest.js';
+import { buildRecords } from '../src/ingest.js';
+import { applyMemoryChanges, mayHoldMemory, MAX_MEMORIES } from '../src/memory.js';
 import { isSmallTalk, isFollowUp, cleanAnswer, buildMessages, retrieveSources } from '../src/rag.js';
 import { fakeVectors, vectorFor } from './helpers.js';
 
@@ -66,8 +67,20 @@ test('retrieval embeds the query (with the previous question for follow-ups)', a
   assert.deepEqual(sources.map(s => [s.number, s.chunk, s.text]), [[1, 1, 'ls lists files'], [2, 2, 'cd changes directory']]);
 });
 
-test('the daily upload budget is shared by everyone and resets each day', () => {
-  useDailyBudget(DAILY_CHUNK_BUDGET, '2000-01-01');
-  assert.throws(() => useDailyBudget(1, '2000-01-01'), { status: 429, message: /today's upload limit/ });
-  useDailyBudget(1, '2000-01-02');
+test('memory changes skip duplicates, forget by position and keep the newest when full', () => {
+  const saved = [{ id: 'a', text: "The user's name is Sam." }, { id: 'b', text: 'The user lives in Delhi.' }];
+  assert.equal(applyMemoryChanges(saved, { add: ["the user's name is sam."], forget: [] }), null, 'nothing new');
+  const moved = applyMemoryChanges(saved, { add: ['The user lives in Pune.', 'The user lives in Pune.'], forget: [2, 99] });
+  assert.deepEqual(moved.map(m => m.text), ["The user's name is Sam.", 'The user lives in Pune.']);
+
+  const full = Array.from({ length: MAX_MEMORIES }, (_, i) => ({ id: `${i}`, text: `Fact ${i}.` }));
+  const updated = applyMemoryChanges(full, { add: ['Newest fact.'], forget: [] });
+  assert.equal(updated.length, MAX_MEMORIES);
+  assert.equal(updated[0].text, 'Fact 1.');
+  assert.equal(updated.at(-1).text, 'Newest fact.');
+
+  const messages = buildMessages({ message: 'Hi, what is ls?', history: [], sources: [], smallTalk: false, hasDocument: false, memories: saved });
+  assert.match(messages[2].content, /remember about the user[\s\S]*- The user lives in Delhi\./);
+  assert.ok(mayHoldMemory('I live in Pune') && mayHoldMemory('Remember that tea is my favourite'));
+  assert.ok(!mayHoldMemory('What is the ls command?'));
 });

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useDispatch } from "react-redux";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
-import { fetchChats } from "./store/chatSlice";
+import { fetchChats, fetchMemories } from "./store/chatSlice";
 import "./App.css";
 
 export default function App() {
@@ -10,6 +10,7 @@ export default function App() {
 
   useEffect(() => {
     dispatch(fetchChats());
+    dispatch(fetchMemories());
   }, [dispatch]);
 
   return (

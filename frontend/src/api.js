@@ -41,10 +41,14 @@ async function request(path, { json, body, method = "GET" } = {}) {
 export const listChats = async () => (await request("/chats")).chats;
 export const createChat = async () => (await request("/chats", { method: "POST" })).chat;
 export const getChat = async (id) => (await request(`/chats/${id}`)).chat;
-export const renameChat = (id, title) => request(`/chats/${id}`, { method: "PATCH", json: { title } });
 export const deleteChat = (id) => request(`/chats/${id}`, { method: "DELETE" });
 export const clearChat = (id) => request(`/chats/${id}/messages`, { method: "DELETE" });
 export const removeDocument = (id) => request(`/chats/${id}/document`, { method: "DELETE" });
+
+// Facts the assistant remembers about this browser's user, across all chats.
+export const listMemories = async () => (await request("/memories")).memories;
+export const deleteMemory = async (id) => (await request(`/memories/${id}`, { method: "DELETE" })).memories;
+export const clearMemories = async () => (await request("/memories", { method: "DELETE" })).memories;
 
 export async function uploadDocument(id, file) {
   const form = new FormData();

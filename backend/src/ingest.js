@@ -9,14 +9,6 @@ import { UserError } from './errors.js';
 const MAX_CHUNKS = 800;
 export const DAILY_CHUNK_BUDGET = 2000;
 
-// shortcut: per-process and reset on restart; move to MongoDB if you run more than one server.
-const budget = { day: '', used: 0 };
-export function useDailyBudget(chunks, today = new Date().toISOString().slice(0, 10)) {
-  if (budget.day !== today) Object.assign(budget, { day: today, used: 0 });
-  if (budget.used + chunks > DAILY_CHUNK_BUDGET) throw new UserError('The server has reached today\'s upload limit. Please try again tomorrow.', 429);
-  budget.used += chunks;
-}
-
 // IDs depend only on the document contents, so re-uploading the same file overwrites its records.
 export function buildRecords(chunks, vectors, filename) {
   const documentId = createHash('sha256').update(JSON.stringify({ model: EMBEDDING_MODEL, chunks })).digest('hex').slice(0, 24);
@@ -31,13 +23,17 @@ export function buildRecords(chunks, vectors, filename) {
 }
 
 // Reads, chunks, embeds and stores a file in the chat's namespace, replacing any previous document.
-export async function indexDocument(vectors, namespace, { buffer, filename }) {
+// store keeps the daily upload budget (in MongoDB, so it survives the server sleeping and restarting).
+export async function indexDocument(vectors, store, namespace, { buffer, filename }) {
   const text = (await extractText(buffer, filename))?.trim();
   if (!text) throw new UserError('No readable text was found in this file. Scanned PDFs need OCR first.');
 
   const chunks = chunkText(text);
   if (chunks.length > MAX_CHUNKS) throw new UserError('This document is too long. Upload a shorter file (about 300 pages of text at most).');
-  useDailyBudget(chunks.length);
+  const today = new Date().toISOString().slice(0, 10);
+  if (!(await store.useBudget(today, chunks.length, DAILY_CHUNK_BUDGET))) {
+    throw new UserError('The server has reached today\'s upload limit. Please try again tomorrow.', 429);
+  }
   const embeddings = await vectors.embed(chunks, 'passage');
   const { documentId, records } = buildRecords(chunks, embeddings, filename);
 

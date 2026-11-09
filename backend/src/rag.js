@@ -1,5 +1,5 @@
 import { TOP_K, HISTORY_MESSAGES } from './config.js';
-import { PERSONA_PROMPT, DOCUMENT_PROMPT, GENERAL_PROMPT, SMALL_TALK_PROMPT } from './prompts.js';
+import { PERSONA_PROMPT, DOCUMENT_PROMPT, GENERAL_PROMPT, SMALL_TALK_PROMPT, MEMORY_CONTEXT_PROMPT } from './prompts.js';
 
 // Greetings, thanks and questions about the assistant skip document search.
 export function isSmallTalk(message) {
@@ -41,8 +41,8 @@ export async function retrieveSources(vectors, namespace, message, previousQuest
     }));
 }
 
-// Builds the Groq message list for one turn.
-export function buildMessages({ message, history, sources, smallTalk, hasDocument }) {
+// Builds the Groq message list for one turn. memories: facts saved about the user across chats.
+export function buildMessages({ message, history, sources, smallTalk, hasDocument, memories = [] }) {
   const mode = smallTalk ? SMALL_TALK_PROMPT : hasDocument ? DOCUMENT_PROMPT : GENERAL_PROMPT;
   const content = hasDocument && !smallTalk
     ? JSON.stringify({ question: message, documentExcerpts: sources.map(({ number, text }) => ({ number, text })) })
@@ -50,6 +50,7 @@ export function buildMessages({ message, history, sources, smallTalk, hasDocumen
   return [
     { role: 'system', content: PERSONA_PROMPT },
     { role: 'system', content: mode },
+    ...(memories.length ? [{ role: 'system', content: `${MEMORY_CONTEXT_PROMPT}\n${memories.map(m => `- ${m.text}`).join('\n')}` }] : []),
     ...history.slice(-HISTORY_MESSAGES).map(({ role, content }) => ({ role, content })),
     { role: 'user', content },
   ];

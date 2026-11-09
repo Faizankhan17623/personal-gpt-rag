@@ -5,6 +5,8 @@ import { makeTitle, summarize } from './shared.js';
 // everything is lost when the server restarts.
 export function createMemoryStore() {
   const chats = new Map();
+  const memories = new Map(); // owner → saved facts
+  const usage = new Map(); // day → chunks uploaded
   const find = (owner, id) => {
     const chat = chats.get(id);
     return chat && chat.owner === owner ? chat : null;
@@ -24,12 +26,6 @@ export function createMemoryStore() {
       const now = Date.now();
       const chat = { id: randomUUID(), owner, title: 'New chat', createdAt: now, updatedAt: now, messages: [], document: null };
       chats.set(chat.id, chat);
-      return copy(chat);
-    },
-    async renameChat(owner, id, title) {
-      const chat = find(owner, id);
-      if (!chat) return null;
-      Object.assign(chat, { title, updatedAt: Date.now() });
       return copy(chat);
     },
     async deleteChat(owner, id) {
@@ -57,6 +53,20 @@ export function createMemoryStore() {
       if (!chat) return null;
       Object.assign(chat, { document, updatedAt: Date.now() });
       return copy(chat);
+    },
+    async getMemories(owner) {
+      return structuredClone(memories.get(owner) || []);
+    },
+    async setMemories(owner, items) {
+      memories.set(owner, structuredClone(items));
+      return items;
+    },
+    // Adds amount to the day's total unless that would go over max. Returns whether it was added.
+    async useBudget(day, amount, max) {
+      const used = (usage.get(day) || 0) + amount;
+      if (used > max) return false;
+      usage.set(day, used);
+      return true;
     },
     async close() {},
   };

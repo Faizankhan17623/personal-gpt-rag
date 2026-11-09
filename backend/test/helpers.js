@@ -55,7 +55,8 @@ export async function startServer(options = {}) {
   const ownToken = `test-session-${randomUUID()}`; // Unique per server, so tests never see each other's chats in a shared database.
   const vectors = options.vectors || fakeVectors();
   const llm = options.llm || fakeComplete();
-  const app = createApp({ store, vectors, complete: llm.complete, rateLimits: false });
+  const remember = options.remember || (async () => ({ add: [], forget: [] }));
+  const app = createApp({ store, vectors, complete: llm.complete, remember, rateLimits: false });
   const server = await new Promise(resolve => { const s = app.listen(0, () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}/api`;
 

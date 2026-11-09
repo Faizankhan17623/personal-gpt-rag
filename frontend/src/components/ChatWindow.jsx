@@ -98,6 +98,7 @@ export default function ChatWindow() {
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                         {isStreamingThis && <span className="caret" />}
                         {!isStreamingThis && <Sources sources={m.sources} />}
+                        {m.memoryUpdated && <div className="memory-note">✓ Memory updated</div>}
                       </>
                     ) : (
                       <p className="user-text">{m.content}</p>
