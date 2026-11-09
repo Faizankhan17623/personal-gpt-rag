@@ -319,6 +319,27 @@
   background: none;
   padding: 0;
 }
+.code-block {
+  position: relative;
+}
+.code-block pre {
+  padding-top: 36px; /* room for the Copy button above the first line */
+}
+.copy-btn {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  background: #2a2a2a;
+  color: #f5f5f5;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.copy-btn:hover {
+  background: #3a3a3a;
+}
 
 /* blinking caret while the answer types out */
 .caret {

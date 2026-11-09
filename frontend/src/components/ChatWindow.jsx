@@ -25,6 +25,28 @@ function TypingDots() {
   );
 }
 
+// Code and commands in answers get a Copy button.
+function CodeBlock({ node: _node, ...props }) {
+  const ref = useRef(null);
+  const [label, setLabel] = useState("Copy");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(ref.current.innerText.replace(/\n$/, ""));
+      setLabel("✓ Copied");
+    } catch {
+      setLabel("Copy failed"); // Clipboard blocked by the browser.
+    }
+    setTimeout(() => setLabel("Copy"), 2000);
+  };
+  return (
+    <div className="code-block">
+      <button className="copy-btn" onClick={copy} aria-label="Copy code">{label}</button>
+      <pre ref={ref} {...props} />
+    </div>
+  );
+}
+const MARKDOWN_COMPONENTS = { pre: CodeBlock };
+
 // The document excerpts an answer was based on, hidden until asked for.
 function Sources({ sources }) {
   const [open, setOpen] = useState(false);
@@ -95,7 +117,7 @@ export default function ChatWindow() {
                       <TypingDots />
                     ) : m.role === "assistant" ? (
                       <>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{m.content}</ReactMarkdown>
                         {isStreamingThis && <span className="caret" />}
                         {!isStreamingThis && <Sources sources={m.sources} />}
                         {m.memoryUpdated && <div className="memory-note">✓ Memory updated</div>}
